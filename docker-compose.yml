@@ -1,0 +1,18 @@
+version: "2"
+services:
+  nerves:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./:/app
+      - ./keyfix.sh:/usr/local/bin/keyfix.sh
+      - ~/.nerves/:/home/nerves/.nerves
+      - ~/.ssh/:/tmp/.ssh
+      - /dev/sdc:/dev/sdc
+      - /var/run/avahi-daemon/socket:/var/run/avahi-daemon/socket
+    env_file: .env
+    privileged: true
+    entrypoint: /usr/local/bin/keyfix.sh
+    working_dir: /app
+    stdin_open: true
