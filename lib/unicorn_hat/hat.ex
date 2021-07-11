@@ -24,7 +24,7 @@ defmodule UnicornHat.Hat do
   # @button_y 20
 
   defmodule State do
-    defstruct [:brightness, :buf, :disp, :left_matrix, :right_matrix]
+    defstruct [:brightness, :buf, :disp, :left_matrix, :right_matrix, :rotation]
   end
 
   def start_link(opts \\ []) do
