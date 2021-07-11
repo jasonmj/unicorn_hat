@@ -17,6 +17,7 @@ defmodule UnicornHat.Hat do
   @cols 17
   @rows 7
 
+  # Buttons are unused here, but shown for reference
   # @button_a 5
   # @button_b 6
   # @button_x 16
