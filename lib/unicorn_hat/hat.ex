@@ -73,50 +73,6 @@ defmodule UnicornHat.Hat do
     SPI.transfer(device, command)
   end
 
-  @impl GenServer
-  def handle_info({:set_pixel, {x, y, r, g, b}}, state) do
-    offset = x * @rows + y
-    # if self._rotation == 90:
-    #     y = _COLS - 1 - y
-    #     offset = (y * _ROWS) + x
-    # if self._rotation == 180:
-    #     x = _COLS - 1 - x
-    #     y = _ROWS - 1 - y
-    #     offset = (x * _ROWS) + y
-    # if self._rotation == 270:
-    #     x = _ROWS - 1 - x
-    #     offset = (y * _ROWS) + x
-    disp = List.replace_at(state.disp, offset, [r >>> 2, g >>> 2, b >>> 2])
-    {:noreply, state |> struct(%{disp: disp})}
-  end
-
-  @impl GenServer
-  def handle_info({:set_all, {r, g, b}}, state) do
-    disp = Enum.map(1..(@cols * @rows), fn _ -> [r >>> 2, g >>> 2, b >>> 2] end)
-    {:noreply, state |> struct(%{disp: disp})}
-  end
-
-  @impl GenServer
-  def handle_info(:clear, state) do
-    disp = Enum.map(1..(@cols * @rows), fn _ -> [0, 0, 0] end)
-    {:noreply, state |> struct(%{disp: disp})}
-  end
-
-  @impl GenServer
-  def handle_info({:set_brightness, brightness}, state) do
-    xfer(
-      state.left_matrix.device,
-      state.left_matrix.pin,
-      <<@cmd_global_brightness, round(Float.floor(63 * brightness))>>
-    )
-
-    xfer(
-      state.right_matrix.device,
-      state.right_matrix.pin,
-      <<@cmd_global_brightness, round(Float.floor(63 * brightness))>>
-    )
-  end
-
   def show(state) do
     buf =
       Enum.reduce(Range.new(1, @cols * @rows - 1), state.buf, fn i, acc ->
@@ -165,6 +121,50 @@ defmodule UnicornHat.Hat do
         5 -> {v, p, q}
       end
     end
+  end
+
+  @impl GenServer
+  def handle_info({:set_pixel, {x, y, r, g, b}}, state) do
+    offset = x * @rows + y
+    # if self._rotation == 90:
+    #     y = _COLS - 1 - y
+    #     offset = (y * _ROWS) + x
+    # if self._rotation == 180:
+    #     x = _COLS - 1 - x
+    #     y = _ROWS - 1 - y
+    #     offset = (x * _ROWS) + y
+    # if self._rotation == 270:
+    #     x = _ROWS - 1 - x
+    #     offset = (y * _ROWS) + x
+    disp = List.replace_at(state.disp, offset, [r >>> 2, g >>> 2, b >>> 2])
+    {:noreply, state |> struct(%{disp: disp})}
+  end
+
+  @impl GenServer
+  def handle_info({:set_all, {r, g, b}}, state) do
+    disp = Enum.map(1..(@cols * @rows), fn _ -> [r >>> 2, g >>> 2, b >>> 2] end)
+    {:noreply, state |> struct(%{disp: disp})}
+  end
+
+  @impl GenServer
+  def handle_info(:clear, state) do
+    disp = Enum.map(1..(@cols * @rows), fn _ -> [0, 0, 0] end)
+    {:noreply, state |> struct(%{disp: disp})}
+  end
+
+  @impl GenServer
+  def handle_info({:set_brightness, brightness}, state) do
+    xfer(
+      state.left_matrix.device,
+      state.left_matrix.pin,
+      <<@cmd_global_brightness, round(Float.floor(63 * brightness))>>
+    )
+
+    xfer(
+      state.right_matrix.device,
+      state.right_matrix.pin,
+      <<@cmd_global_brightness, round(Float.floor(63 * brightness))>>
+    )
   end
 
   @impl GenServer
