@@ -43,7 +43,8 @@ defmodule UnicornHat.Hat do
       buf: buf,
       disp: disp,
       left_matrix: {left_matrix_device, 8, 0},
-      right_matrix: {right_matrix_device, 7, 28 * 8}
+      right_matrix: {right_matrix_device, 7, 28 * 8},
+      rotation: 0
     }
 
     initialize_device(state.left_matrix, state.buf)
@@ -134,17 +135,25 @@ defmodule UnicornHat.Hat do
 
   @impl GenServer
   def handle_info({:set_pixel, {x, y, r, g, b}}, state) do
-    offset = x * @rows + y
-    # if self._rotation == 90:
-    #     y = _COLS - 1 - y
-    #     offset = (y * _ROWS) + x
-    # if self._rotation == 180:
-    #     x = _COLS - 1 - x
-    #     y = _ROWS - 1 - y
-    #     offset = (x * _ROWS) + y
-    # if self._rotation == 270:
-    #     x = _ROWS - 1 - x
-    #     offset = (y * _ROWS) + x
+    offset =
+      case state.rotation do
+        0 ->
+          x * @rows + y
+
+        90 ->
+          y = @cols - 1 - y
+          y * @rows + x
+
+        180 ->
+          x = @cols - 1 - x
+          y = @rows - 1 - y
+          x * @rows + y
+
+        270 ->
+          x = @rows - 1 - x
+          y * @rows + x
+      end
+
     disp = List.replace_at(state.disp, offset, [r >>> 2, g >>> 2, b >>> 2])
     {:noreply, state |> struct(%{disp: disp})}
   end
@@ -174,6 +183,15 @@ defmodule UnicornHat.Hat do
       state.right_matrix.pin,
       <<@cmd_global_brightness, round(Float.floor(63 * brightness))>>
     )
+  end
+
+  @impl GenServer
+  def handle_info({:set_rotation, rotation}, state) do
+    unless Enum.member?([0, 90, 180, 270], rotation) do
+      raise "Rotation must be one of 0, 90, 180, 270"
+    end
+
+    {:noreply, state |> struct(%{rotation: rotation})}
   end
 
   @impl GenServer
