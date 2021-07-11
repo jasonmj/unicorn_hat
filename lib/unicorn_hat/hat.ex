@@ -70,6 +70,14 @@ defmodule UnicornHat.Hat do
     xfer(device, pin, <<@cmd_system_ctrl, 0x03>>)
   end
 
+  defp shutdown(state) do
+    Enum.map([state.left_matrix, state.right_matrix], fn {device, pin, _offset} ->
+      xfer(device, pin, <<@cmd_com_pin_ctrl, 0x00>>)
+      xfer(device, pin, <<@cmd_row_pin_ctrl, 0x00, 0x00, 0x00, 0x00>>)
+      xfer(device, pin, <<@cmd_system_ctrl, 0x00>>)
+    end)
+  end
+
   defp xfer(device, _pin, command) do
     SPI.transfer(device, command)
   end
@@ -166,6 +174,12 @@ defmodule UnicornHat.Hat do
       state.right_matrix.pin,
       <<@cmd_global_brightness, round(Float.floor(63 * brightness))>>
     )
+  end
+
+  @impl GenServer
+  def handle_info(:shutdown, state) do
+    shutdown(state)
+    {:noreply, state}
   end
 
   @impl GenServer
