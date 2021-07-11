@@ -133,6 +133,19 @@ defmodule UnicornHat.Hat do
     end
   end
 
+  defp get_shape(state) do
+    if Enum.member?([90, 270], state.rotation) do
+      {@rows, @cols}
+    else
+      {@cols, @rows}
+    end
+  end
+
+  @impl GenServer
+  def handle_call(:get_state, _from, state) do
+    {:reply, :ok, get_shape(state)}
+  end
+
   @impl GenServer
   def handle_info({:set_pixel, {x, y, r, g, b}}, state) do
     offset =
