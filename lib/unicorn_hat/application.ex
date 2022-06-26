@@ -29,7 +29,7 @@ defmodule UnicornHat.Application do
 
     [
       # Children for targets only
-      UnicornHat.Hat
+      UnicornHat.Display
     ]
   end
 

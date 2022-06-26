@@ -1,27 +1,16 @@
-defmodule UnicornHat.Hat do
+defmodule UnicornHat.Display do
+  @moduledoc File.read!("README.md")
+             |> String.split(~r/<!-- DISPLAYDOC !-->/)
+             |> Enum.drop(1)
+             |> Enum.join("\n")
+
   require Logger
   use GenServer
   use Bitwise
-  alias Circuits.SPI
-  alias UnicornHat.Hardware
-
-  # Holtek HT16D35
-  @cmd_soft_reset 0xCC
-  @cmd_global_brightness 0x37
-  @cmd_com_pin_ctrl 0x41
-  @cmd_row_pin_ctrl 0x42
-  @cmd_write_display 0x80
-  @cmd_system_ctrl 0x35
-  @cmd_scroll_ctrl 0x20
+  alias UnicornHat.HT16D35, as: Driver
 
   @cols 17
   @rows 7
-
-  # Buttons are unused here, but shown for reference
-  # @button_a 5
-  # @button_b 6
-  # @button_x 16
-  # @button_y 20
 
   defmodule State do
     defstruct [:brightness, :buf, :disp, :left_matrix, :right_matrix, :rotation]
@@ -33,8 +22,6 @@ defmodule UnicornHat.Hat do
 
   @impl GenServer
   def init(_opts) do
-    {:ok, left_matrix_device} = Circuits.SPI.open("spidev0.0")
-    {:ok, right_matrix_device} = Circuits.SPI.open("spidev0.1")
     disp = Enum.map(1..(@cols * @rows), fn _ -> [0, 0, 0] end)
     buf = Enum.map(1..(28 * 8 * 2), fn _ -> 0 end)
 
@@ -42,73 +29,24 @@ defmodule UnicornHat.Hat do
       brightness: 0,
       buf: buf,
       disp: disp,
-      left_matrix: {left_matrix_device, 8, 0},
-      right_matrix: {right_matrix_device, 7, 28 * 8},
+      left_matrix: nil,
+      right_matrix: nil,
       rotation: 0
     }
 
-    initialize_device(state.left_matrix, state.buf)
-    initialize_device(state.right_matrix, state.buf)
+    {:ok, state, {:continue, :init}}
+  end
+
+  @impl GenServer
+  def handle_continue(:init, state) do
+    {:ok, left_matrix_device} = Circuits.SPI.open("spidev0.0")
+    {:ok, right_matrix_device} = Circuits.SPI.open("spidev0.1")
+    left_matrix = {left_matrix_device, 8, 0}
+    right_matrix = {right_matrix_device, 7, 28 * 8}
+    Driver.initialize_device(left_matrix, state.buf)
+    Driver.initialize_device(right_matrix, state.buf)
     :timer.send_interval(200, :tick)
-    {:ok, state}
-  end
-
-  defp initialize_device({device, pin, offset}, buf) do
-    xfer(device, pin, <<@cmd_soft_reset>>)
-    xfer(device, pin, <<@cmd_global_brightness, 0x01>>)
-    xfer(device, pin, <<@cmd_scroll_ctrl, 0x00>>)
-    xfer(device, pin, <<@cmd_system_ctrl, 0x00>>)
-
-    xfer(
-      device,
-      pin,
-      <<@cmd_write_display, 0x00>> <>
-        :erlang.list_to_binary(Enum.slice(buf, Range.new(offset, offset + 28 * 8)))
-    )
-
-    xfer(device, pin, <<@cmd_com_pin_ctrl, 0xFF>>)
-    xfer(device, pin, <<@cmd_row_pin_ctrl, 0xFF, 0xFF, 0xFF, 0xFF>>)
-    xfer(device, pin, <<@cmd_system_ctrl, 0x03>>)
-  end
-
-  defp shutdown(state) do
-    Enum.map([state.left_matrix, state.right_matrix], fn {device, pin, _offset} ->
-      xfer(device, pin, <<@cmd_com_pin_ctrl, 0x00>>)
-      xfer(device, pin, <<@cmd_row_pin_ctrl, 0x00, 0x00, 0x00, 0x00>>)
-      xfer(device, pin, <<@cmd_system_ctrl, 0x00>>)
-    end)
-  end
-
-  defp xfer(device, _pin, command) do
-    SPI.transfer(device, command)
-  end
-
-  def show(state) do
-    buf =
-      Enum.reduce(Range.new(1, @cols * @rows - 1), state.buf, fn i, acc ->
-        {lut_index, _} = List.pop_at(Hardware.get_lut(), i)
-        [ir, ig, ib, _] = lut_index ++ [0]
-        {disp_index, _} = List.pop_at(state.disp, i)
-        [r, g, b, _] = disp_index ++ [0]
-
-        acc
-        |> List.replace_at(ir, r)
-        |> List.replace_at(ig, g)
-        |> List.replace_at(ib, b)
-      end)
-
-    Enum.map([state.left_matrix, state.right_matrix], fn {device, pin, offset} ->
-      xfer(
-        device,
-        pin,
-        <<@cmd_write_display, 0x00>> <>
-          :erlang.list_to_binary(Enum.slice(buf, Range.new(offset, offset + 28 * 8)))
-      )
-
-      {:ok}
-    end)
-
-    {:ok}
+    {:noreply, %{state | left_matrix: left_matrix, right_matrix: right_matrix}}
   end
 
   defp hsv_to_rgb(h, s, v) do
@@ -185,17 +123,7 @@ defmodule UnicornHat.Hat do
 
   @impl GenServer
   def handle_info({:set_brightness, brightness}, state) do
-    xfer(
-      state.left_matrix.device,
-      state.left_matrix.pin,
-      <<@cmd_global_brightness, round(Float.floor(63 * brightness))>>
-    )
-
-    xfer(
-      state.right_matrix.device,
-      state.right_matrix.pin,
-      <<@cmd_global_brightness, round(Float.floor(63 * brightness))>>
-    )
+    Driver.set_brightness(brightness, state)
   end
 
   @impl GenServer
@@ -209,7 +137,7 @@ defmodule UnicornHat.Hat do
 
   @impl GenServer
   def handle_info(:shutdown, state) do
-    shutdown(state)
+    Driver.shutdown(state)
     {:noreply, state}
   end
 
@@ -228,7 +156,7 @@ defmodule UnicornHat.Hat do
       end)
     end)
 
-    show(state)
+    Driver.set_frame(state)
     {:noreply, state}
   end
 
