@@ -1,13 +1,11 @@
 defmodule UnicornHat.HT16D35 do
-  @moduledoc File.read!("README.md")
-             |> String.split(~r/<!-- DISPLAYDOC !-->/)
-             |> Enum.drop(1)
-             |> Enum.join("\n")
+  @moduledoc """
+  The hardware communication layer for the Holtek HT16D35.
+  """
 
   alias Circuits.SPI
-  alias UnicornHat.Hardware
+  alias UnicornHat.HT16D35.LookupTable
 
-  # Holtek HT16D35
   @cmd_soft_reset 0xCC
   @cmd_global_brightness 0x37
   @cmd_com_pin_ctrl 0x41
@@ -20,41 +18,37 @@ defmodule UnicornHat.HT16D35 do
   @rows 7
 
   def initialize_device({device, pin, offset}, buf) do
-    xfer(device, pin, <<@cmd_soft_reset>>)
-    xfer(device, pin, <<@cmd_global_brightness, 0x01>>)
-    xfer(device, pin, <<@cmd_scroll_ctrl, 0x00>>)
-    xfer(device, pin, <<@cmd_system_ctrl, 0x00>>)
+    transfer(device, pin, <<@cmd_soft_reset>>)
+    transfer(device, pin, <<@cmd_global_brightness, 0x01>>)
+    transfer(device, pin, <<@cmd_scroll_ctrl, 0x00>>)
+    transfer(device, pin, <<@cmd_system_ctrl, 0x00>>)
 
-    xfer(
+    transfer(
       device,
       pin,
       <<@cmd_write_display, 0x00>> <>
         :erlang.list_to_binary(Enum.slice(buf, Range.new(offset, offset + 28 * 8)))
     )
 
-    xfer(device, pin, <<@cmd_com_pin_ctrl, 0xFF>>)
-    xfer(device, pin, <<@cmd_row_pin_ctrl, 0xFF, 0xFF, 0xFF, 0xFF>>)
-    xfer(device, pin, <<@cmd_system_ctrl, 0x03>>)
+    transfer(device, pin, <<@cmd_com_pin_ctrl, 0xFF>>)
+    transfer(device, pin, <<@cmd_row_pin_ctrl, 0xFF, 0xFF, 0xFF, 0xFF>>)
+    transfer(device, pin, <<@cmd_system_ctrl, 0x03>>)
   end
 
-  def shutdown(state) do
-    Enum.map([state.left_matrix, state.right_matrix], fn {device, pin, _offset} ->
-      xfer(device, pin, <<@cmd_com_pin_ctrl, 0x00>>)
-      xfer(device, pin, <<@cmd_row_pin_ctrl, 0x00, 0x00, 0x00, 0x00>>)
-      xfer(device, pin, <<@cmd_system_ctrl, 0x00>>)
+  def shutdown(left_matrix, right_matrix) do
+    Enum.map([left_matrix, right_matrix], fn {device, pin, _offset} ->
+      transfer(device, pin, <<@cmd_com_pin_ctrl, 0x00>>)
+      transfer(device, pin, <<@cmd_row_pin_ctrl, 0x00, 0x00, 0x00, 0x00>>)
+      transfer(device, pin, <<@cmd_system_ctrl, 0x00>>)
     end)
   end
 
-  defp xfer(device, _pin, command) do
-    SPI.transfer(device, command)
-  end
-
-  def set_frame(state) do
+  def set_frame(buf, disp, left_matrix, right_matrix) do
     buf =
-      Enum.reduce(Range.new(1, @cols * @rows - 1), state.buf, fn i, acc ->
-        {lut_index, _} = List.pop_at(Hardware.get_lut(), i)
+      Enum.reduce(Range.new(1, @cols * @rows - 1), buf, fn i, acc ->
+        {lut_index, _} = List.pop_at(LookupTable.get(), i)
         [ir, ig, ib, _] = lut_index ++ [0]
-        {disp_index, _} = List.pop_at(state.disp, i)
+        {disp_index, _} = List.pop_at(disp, i)
         [r, g, b, _] = disp_index ++ [0]
 
         acc
@@ -63,31 +57,31 @@ defmodule UnicornHat.HT16D35 do
         |> List.replace_at(ib, b)
       end)
 
-    Enum.map([state.left_matrix, state.right_matrix], fn {device, pin, offset} ->
-      xfer(
+    Enum.map([left_matrix, right_matrix], fn {device, pin, offset} ->
+      transfer(
         device,
         pin,
         <<@cmd_write_display, 0x00>> <>
           :erlang.list_to_binary(Enum.slice(buf, Range.new(offset, offset + 28 * 8)))
       )
-
-      {:ok}
     end)
-
-    {:ok}
   end
 
-  def set_brightness(brightness, state) do
-    xfer(
-      state.left_matrix.device,
-      state.left_matrix.pin,
+  def set_brightness(brightness, left_matrix, right_matrix) do
+    transfer(
+      left_matrix.device,
+      left_matrix.pin,
       <<@cmd_global_brightness, round(Float.floor(63 * brightness))>>
     )
 
-    xfer(
-      state.right_matrix.device,
-      state.right_matrix.pin,
+    transfer(
+      right_matrix.device,
+      right_matrix.pin,
       <<@cmd_global_brightness, round(Float.floor(63 * brightness))>>
     )
+  end
+
+  defp transfer(device, _pin, command) do
+    SPI.transfer(device, command)
   end
 end

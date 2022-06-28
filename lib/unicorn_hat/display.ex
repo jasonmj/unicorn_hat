@@ -4,6 +4,7 @@ defmodule UnicornHat.Display do
              |> Enum.drop(1)
              |> Enum.join("\n")
 
+  @behaviour UnicornHat.Display.API
   require Logger
   use GenServer
   use Bitwise
@@ -16,8 +17,45 @@ defmodule UnicornHat.Display do
     defstruct [:brightness, :buf, :disp, :left_matrix, :right_matrix, :rotation]
   end
 
+  @impl true
+  def clear() do
+    GenServer.cast(__MODULE__, :clear)
+  end
+
+  @impl true
+  def set_all(r, g, b) do
+    Logger.info("setting all")
+    GenServer.cast(__MODULE__, {:set_all, {r, g, b}})
+  end
+
+  @impl true
+  def set_brightness(brightness) do
+    GenServer.cast(__MODULE__, {:set_brightness, brightness})
+  end
+
+  @impl true
+  def set_pixel(x, y, r, g, b) do
+    GenServer.cast(__MODULE__, {:set_pixel, {x, y, r, g, b}})
+  end
+
+  @impl true
+  def set_rotation(rotation) do
+    GenServer.cast(__MODULE__, {:set_rotation, rotation})
+  end
+
+  @impl true
+  def show() do
+    GenServer.cast(__MODULE__, :show)
+  end
+
+  @impl true
+  def shutdown() do
+    GenServer.cast(__MODULE__, :shutdown)
+  end
+
+  @impl true
   def start_link(opts \\ []) do
-    GenServer.start_link(__MODULE__, opts, name: Hat)
+    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   end
 
   @impl GenServer
@@ -45,47 +83,31 @@ defmodule UnicornHat.Display do
     right_matrix = {right_matrix_device, 7, 28 * 8}
     Driver.initialize_device(left_matrix, state.buf)
     Driver.initialize_device(right_matrix, state.buf)
-    :timer.send_interval(200, :tick)
     {:noreply, %{state | left_matrix: left_matrix, right_matrix: right_matrix}}
   end
 
-  defp hsv_to_rgb(h, s, v) do
-    if s == 0.0 do
-      {v, v, v}
-    else
-      x = Float.floor(h * 6.0)
-      f = h * 6.0 - x
-      p = v * (1.0 - s)
-      q = v * (1.0 - s * f)
-      t = v * (1.0 - s * (1.0 - f))
-      i = x |> round |> rem(6)
-
-      case i do
-        0 -> {v, t, p}
-        1 -> {q, v, p}
-        2 -> {p, v, t}
-        3 -> {p, q, v}
-        4 -> {t, p, v}
-        5 -> {v, p, q}
-      end
-    end
-  end
-
-  defp get_shape(state) do
-    if Enum.member?([90, 270], state.rotation) do
-      {@rows, @cols}
-    else
-      {@cols, @rows}
-    end
+  @impl GenServer
+  def handle_cast(:clear, state) do
+    disp = Enum.map(1..(@cols * @rows), fn _ -> [0, 0, 0] end)
+    {:noreply, %{state | disp: disp}}
   end
 
   @impl GenServer
-  def handle_call(:get_state, _from, state) do
-    {:reply, :ok, get_shape(state)}
+  def handle_cast({:set_all, {r, g, b}}, state) do
+    Logger.info("handlle :set_all")
+    disp = Enum.map(1..(@cols * @rows), fn _ -> [r >>> 2, g >>> 2, b >>> 2] end)
+    Logger.debug("#{inspect(disp)}")
+    {:noreply, %{state | disp: disp}}
   end
 
   @impl GenServer
-  def handle_info({:set_pixel, {x, y, r, g, b}}, state) do
+  def handle_cast({:set_brightness, brightness}, state) do
+    Driver.set_brightness(brightness, state.left_matrix, state.right_matrix)
+    {:noreply, state}
+  end
+
+  @impl GenServer
+  def handle_cast({:set_pixel, {x, y, r, g, b}}, state) do
     offset =
       case state.rotation do
         0 ->
@@ -106,63 +128,27 @@ defmodule UnicornHat.Display do
       end
 
     disp = List.replace_at(state.disp, offset, [r >>> 2, g >>> 2, b >>> 2])
-    {:noreply, state |> struct(%{disp: disp})}
+    {:noreply, %{state | disp: disp}}
   end
 
   @impl GenServer
-  def handle_info({:set_all, {r, g, b}}, state) do
-    disp = Enum.map(1..(@cols * @rows), fn _ -> [r >>> 2, g >>> 2, b >>> 2] end)
-    {:noreply, state |> struct(%{disp: disp})}
-  end
-
-  @impl GenServer
-  def handle_info(:clear, state) do
-    disp = Enum.map(1..(@cols * @rows), fn _ -> [0, 0, 0] end)
-    {:noreply, state |> struct(%{disp: disp})}
-  end
-
-  @impl GenServer
-  def handle_info({:set_brightness, brightness}, state) do
-    Driver.set_brightness(brightness, state)
-  end
-
-  @impl GenServer
-  def handle_info({:set_rotation, rotation}, state) do
+  def handle_cast({:set_rotation, rotation}, state) do
     unless Enum.member?([0, 90, 180, 270], rotation) do
       raise "Rotation must be one of 0, 90, 180, 270"
     end
 
-    {:noreply, state |> struct(%{rotation: rotation})}
+    {:noreply, %{state | rotation: rotation}}
   end
 
   @impl GenServer
-  def handle_info(:shutdown, state) do
-    Driver.shutdown(state)
+  def handle_cast(:show, state) do
+    Driver.set_frame(state.buf, state.disp, state.left_matrix, state.right_matrix)
     {:noreply, state}
   end
 
   @impl GenServer
-  def handle_info(:tick, state) do
-    Enum.map(Range.new(1, @rows), fn y ->
-      Enum.map(Range.new(1, @cols), fn x ->
-        hue = :os.system_time(:seconds) / 4.0 + x / (@cols * 2) + y / @rows
-        {rx, gx, bx} = hsv_to_rgb(hue, 1.0, 1.0)
-
-        {r, g, b} =
-          {round(Float.floor(rx * 255)), round(Float.floor(gx * 255)),
-           round(Float.floor(bx * 255))}
-
-        Process.send(self(), {:set_pixel, {x, y, r, g, b}}, [])
-      end)
-    end)
-
-    Driver.set_frame(state)
-    {:noreply, state}
-  end
-
-  @impl GenServer
-  def handle_info(catch_all, state) do
-    Logger.info(inspect(catch_all))
+  def handle_cast(:shutdown, state) do
+    Driver.shutdown(state.left_matrix, state.right_matrix)
     {:noreply, state}
   end
 end

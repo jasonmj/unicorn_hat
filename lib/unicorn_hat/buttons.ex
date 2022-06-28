@@ -1,123 +1,123 @@
 defmodule UnicornHat.Buttons do
-  @moduledoc """
-  Buttons interface for Unicorn Hat Mini
+  @moduledoc File.read!("README.md")
+             |> String.split(~r/<!-- BUTTONSDOC !-->/)
+             |> Enum.drop(1)
+             |> Enum.join("\n")
 
-  Pass a `:handler` option as a pid or {m, f, a} to receive the button events
+  use GenServer
+
+  alias Circuits.GPIO
+
+  require Logger
+
+  @typedoc """
+  A name of Unicorn Hat Mini button
+
+  These are labelled A, B, X, and Y on the board.
   """
-  # use GenServer
+  @type name() :: :a | :b | :x | :y
 
-  # alias Circuits.GPIO
+  defmodule Event do
+    defstruct [:action, :name, :value, :timestamp]
 
-  # require Logger
+    @type t :: %Event{
+            action: :pressed | :released,
+            name: Buttons.name(),
+            value: 1 | 0,
+            timestamp: non_neg_integer()
+          }
+  end
 
-  # @typedoc """
-  # A name of Scroll HAT Mini button
+  @pin_a 5
+  @pin_b 6
+  @pin_x 16
+  @pin_y 24
 
-  # These are labelled A, B, X, and Y on the board.
-  # """
-  # @type name() :: :a | :b | :x | :y
+  @doc """
+  Start a GenServer to watch the buttons on the Unicorn Hat Mini
 
-  # defmodule Event do
-  #   defstruct [:action, :name, :value, :timestamp]
+  Options:
 
-  #   @type t :: %Event{
-  #           action: :pressed | :released,
-  #           name: Buttons.name(),
-  #           value: 1 | 0,
-  #           timestamp: non_neg_integer()
-  #         }
-  # end
+  * `:handler` - pass a pid or an MFA to receive button events
+  """
+  @spec start_link(keyword) :: GenServer.on_start()
+  def start_link(opts \\ []) do
+    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+  end
 
-  # @pin_a 5
-  # @pin_b 6
-  # @pin_x 16
-  # @pin_y 24
+  @doc """
+  Return the current state of the button
 
-  # @doc """
-  # Start a GenServer to watch the buttons on the Scroll HAT Mini
+  `0` - released
+  `1` - pressed
+  """
+  @spec get_value(name()) :: 0 | 1
+  def get_value(button) do
+    GenServer.call(__MODULE__, {:get_value, button})
+  end
 
-  # Options:
+  @impl GenServer
+  def init(opts) do
+    {:ok, %{button_to_ref: %{}, pin_to_button: %{}, handler: opts[:handler]}, {:continue, :init}}
+  end
 
-  # * `:handler` - pass a pid or an MFA to receive button events
-  # """
-  # @spec start_link(keyword) :: GenServer.on_start()
-  # def start_link(opts \\ []) do
-  #   GenServer.start_link(__MODULE__, opts, name: __MODULE__)
-  # end
+  @impl GenServer
+  def handle_continue(:init, state) do
+    {:ok, a} = GPIO.open(@pin_a, :input, pull_mode: :pullup)
+    {:ok, b} = GPIO.open(@pin_b, :input, pull_mode: :pullup)
+    {:ok, x} = GPIO.open(@pin_x, :input, pull_mode: :pullup)
+    {:ok, y} = GPIO.open(@pin_y, :input, pull_mode: :pullup)
+    :ok = GPIO.set_interrupts(a, :both)
+    :ok = GPIO.set_interrupts(b, :both)
+    :ok = GPIO.set_interrupts(x, :both)
+    :ok = GPIO.set_interrupts(y, :both)
 
-  # @doc """
-  # Return the current state of the button
+    button_to_ref = %{a: a, b: b, x: x, y: y}
 
-  # `0` - released
-  # `1` - pressed
-  # """
-  # @spec get_value(name()) :: 0 | 1
-  # def get_value(button) do
-  #   GenServer.call(__MODULE__, {:get_value, button})
-  # end
+    pin_to_button = %{
+      @pin_a => :a,
+      @pin_b => :b,
+      @pin_x => :x,
+      @pin_y => :y
+    }
 
-  # @impl GenServer
-  # def init(opts) do
-  #   {:ok, %{button_to_ref: %{}, pin_to_button: %{}, handler: opts[:handler]}, {:continue, :init}}
-  # end
+    {:noreply, %{state | button_to_ref: button_to_ref, pin_to_button: pin_to_button}}
+  end
 
-  # @impl GenServer
-  # def handle_continue(:init, state) do
-  #   {:ok, a} = GPIO.open(@pin_a, :input, pull_mode: :pullup)
-  #   {:ok, b} = GPIO.open(@pin_b, :input, pull_mode: :pullup)
-  #   {:ok, x} = GPIO.open(@pin_x, :input, pull_mode: :pullup)
-  #   {:ok, y} = GPIO.open(@pin_y, :input, pull_mode: :pullup)
-  #   :ok = GPIO.set_interrupts(a, :both)
-  #   :ok = GPIO.set_interrupts(b, :both)
-  #   :ok = GPIO.set_interrupts(x, :both)
-  #   :ok = GPIO.set_interrupts(y, :both)
+  @impl GenServer
+  def handle_call({:get_value, name}, _from, state) do
+    inverted_value = GPIO.read(state.button_to_ref[name])
+    value = 1 - inverted_value
 
-  #   button_to_ref = %{a: a, b: b, x: x, y: y}
+    {:reply, value, state}
+  end
 
-  #   pin_to_button = %{
-  #     @pin_a => :a,
-  #     @pin_b => :b,
-  #     @pin_x => :x,
-  #     @pin_y => :y
-  #   }
+  @impl GenServer
+  def handle_info({:circuits_gpio, pin, timestamp, inverted_value}, state) do
+    value = 1 - inverted_value
+    action = if value != 0, do: :pressed, else: :released
 
-  #   {:noreply, %{state | button_to_ref: button_to_ref, pin_to_button: pin_to_button}}
-  # end
+    event = %Event{
+      action: action,
+      name: state.pin_to_button[pin],
+      value: value,
+      timestamp: timestamp
+    }
 
-  # @impl GenServer
-  # def handle_call({:get_value, name}, _from, state) do
-  #   inverted_value = GPIO.read(state.button_to_ref[name])
-  #   value = 1 - inverted_value
+    _ = send_event(state.handler, event)
 
-  #   {:reply, value, state}
-  # end
+    {:noreply, state}
+  end
 
-  # @impl GenServer
-  # def handle_info({:circuits_gpio, pin, timestamp, inverted_value}, state) do
-  #   value = 1 - inverted_value
-  #   action = if value != 0, do: :pressed, else: :released
+  def handle_info(_other, state), do: {:noreply, state}
 
-  #   event = %Event{
-  #     action: action,
-  #     name: state.pin_to_button[pin],
-  #     value: value,
-  #     timestamp: timestamp
-  #   }
+  defp send_event(handler, event) when is_pid(handler), do: send(handler, event)
 
-  #   _ = send_event(state.handler, event)
+  defp send_event({m, f, a}, event) when is_atom(m) and is_atom(f) and is_list(a) do
+    apply(m, f, [event | a])
+  end
 
-  #   {:noreply, state}
-  # end
-
-  # def handle_info(_other, state), do: {:noreply, state}
-
-  # defp send_event(handler, event) when is_pid(handler), do: send(handler, event)
-
-  # defp send_event({m, f, a}, event) when is_atom(m) and is_atom(f) and is_list(a) do
-  #   apply(m, f, [event | a])
-  # end
-
-  # defp send_event(_, event) do
-  #   Logger.info("[ScrollHat] unhandled button event - #{inspect(event)}")
-  # end
+  defp send_event(_, event) do
+    Logger.info("[UnicornHatMini] unhandled button event - #{inspect(event)}")
+  end
 end

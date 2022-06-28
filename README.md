@@ -1,6 +1,73 @@
 # UnicornHat
 
-**TODO: Add description**
+An Elixir Nerves implementation of the Pimoroni [Unicorn Hat Mini](https://shop.pimoroni.com/products/unicorn-hat-mini).
+
+Based on the official Pimoroni library: [pimoroni/unicornhatmini-python](https://github.com/pimoroni/unicornhatmini-python/).
+
+And a similar Pimoroni product & Elixir library: [jjcarstens/scroll_hat](https://github.com/jjcarstens/scroll_hat).
+
+## Usage
+The main interface is via the `UnicornHat.Display`.
+
+<!-- DISPLAYDOC !-->
+`UnicornHat.Display` interacts with the HT16D35 RGB LED driver. To use it, you need to either add it to your supervision tree with a child spec like `UnicornHat.Display` or start it manually:
+
+```elixir
+{:ok, _pid} = UnicornHat.Display.start_link()
+```
+
+After the `UnicornHat.Display` GenServer has started, you can use a few basic commands to control it:
+
+```elixir
+alias UnicornHat.Display
+
+# Set all the LEDS in the display buffer to the specified RGB color combination
+Display.set_all(0, 0, 255)
+
+# Transfer the current display buffer to the device
+Display.show()
+
+# Clear the dislay buffer and update the device
+Display.clear()
+Display.show()
+
+# Set the brightness for the display
+Display.set_brightness(255)
+
+# Set the rotation for the display to one of 0, 90, 180, or 270 degrees
+Display.set_rotation(90)
+
+# Set the specified pixel to the specified RGB color combination
+Display.set_pixel(0, 0, 255, 255, 255)
+Display.show()
+
+# Turn off the display
+Display.shutdown()
+```
+
+<!-- DISPLAYDOC !-->
+
+This library also features a GenServer module for interfacing with the onboard buttons included in the Unicorn Hat Mini.
+
+<!-- BUTTONSDOC !-->
+
+The Unicorn Hat mini has 4 buttons that are monitored independently from the display
+and can be started in supervison.
+
+Supply the `:handler` option as either a pid, or `{module, function, args}` tuple
+specifying when to send events to. If no handler is supplied, events are simply logged
+
+```elixir
+UnicornHat.Buttons.start_link(handler: self())
+```
+
+You can also query the current value of a button at any time
+
+```elixir
+UnicornHat.Buttons.get_value(:a)
+```
+
+<!-- BUTTONSDOC !-->
 
 ## Targets
 
